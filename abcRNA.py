@@ -199,7 +199,7 @@ if __name__ == "__main__":
         predictor = RNATertiaryStructurePredictor(
             secondary_structure, 
             reference_structure,
-            max_iterations=5000,  
+            max_iterations=100,  
             colony_size=200,       
             limit=20,              
             alpha1=0.7,        # recovery    
