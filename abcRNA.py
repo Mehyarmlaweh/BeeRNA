@@ -1,4 +1,4 @@
-import math
+import os
 import numpy as np
 from typing import List, Tuple, Optional
 import random
@@ -6,6 +6,7 @@ from scipy.spatial.distance import pdist, squareform
 from extract_rna_secondary_structure import extract_rna_sequence, extract_reference_structure
 from visualize import compare_structures,kabsch_alignment
 from dataclasses import dataclass
+import pandas as pd
 
 @dataclass
 class OptimizationConfig:
@@ -20,6 +21,7 @@ class OptimizationConfig:
     step_size_decay: float = 0.998  # decay for step size
     stagnation_limit: int = 100     # iterations without improvement before reset
     min_step_size: float = 0.01     # min step size
+    max_sequence_length: int = 500  # Maximum allowed RNA sequence length
 
 
 def kabsch_alignment(P: np.ndarray, Q: np.ndarray) -> np.ndarray:
@@ -325,6 +327,69 @@ class RNATertiaryStructurePredictor:
         return grad
 
 
+def process_rna_files_in_folder(folder_path):
+    # List all PDB files in the directory
+    pdb_files = [f for f in os.listdir(folder_path) if f.endswith('.pdb')]
+
+    # Initialize an empty DataFrame to store results
+    results_df = pd.DataFrame(columns=['PDB_ID', 'Best_Fitness', 'Recovery_Score', 'Macro_F1_Score', 'SC_TM_Score', 'RMSD', 'Sequence_Length'])
+
+    # Iterate over each PDB file
+    for pdb_file in pdb_files:
+        pdb_file_path = os.path.join(folder_path, pdb_file)
+        secondary_structure = extract_rna_sequence(pdb_file_path)
+
+        if not secondary_structure:
+            print(f"Error: No RNA sequence extracted from {pdb_file}. Skipping this file.")
+            continue
+
+        # Check sequence length
+        if len(secondary_structure) >= 500:
+            print(f"Skipping {pdb_file}: Sequence length {len(secondary_structure)} exceeds limit of 500")
+            continue
+
+        reference_structure = extract_reference_structure(pdb_file_path)
+        config = OptimizationConfig(
+            max_iterations=5000,
+            colony_size=100,
+            initial_step_size=1.0,
+            step_size_decay=0.998,
+            stagnation_limit=100
+        )
+        predictor = RNATertiaryStructurePredictor(secondary_structure, reference_structure, config)
+        best_structure, best_fitness = predictor.run()
+
+        # Ensure alignment before RMSD
+        aligned_best = kabsch_alignment(best_structure, reference_structure)
+        recovery = predictor.calculate_recovery(best_structure)
+        macro_f1 = predictor.calculate_macro_f1(best_structure)
+        sc_tm = predictor.calculate_sc_tm(best_structure)
+        rmsd = predictor.calculate_rmsd(aligned_best, reference_structure)
+
+        # Add results to the DataFrame
+        new_row = pd.DataFrame([{
+            'PDB_ID': pdb_file,
+            'Best_Fitness': best_fitness,
+            'Recovery_Score': recovery,
+            'Macro_F1_Score': macro_f1,
+            'SC_TM_Score': sc_tm,
+            'RMSD': rmsd,
+            'Sequence_Length': len(secondary_structure)
+        }])
+        results_df = pd.concat([results_df, new_row], ignore_index=True)
+        print(f"Processed {pdb_file} - Length: {len(secondary_structure)} - Results added to DataFrame.")
+
+    # Save the DataFrame to a CSV file
+    results_df.to_csv('rna_structure_results.csv', index=False)
+    print("All results saved to rna_structure_results.csv.")
+
+
+if __name__ == "__main__":
+    folder_path = "rnasolo_dataset" 
+    process_rna_files_in_folder(folder_path)
+
+
+""""
 if __name__ == "__main__":
     pdb_file = "rnasolo_dataset/1FIR_1_A.pdb"
     secondary_structure = extract_rna_sequence(pdb_file)
@@ -369,3 +434,4 @@ if __name__ == "__main__":
             "Best Predicted Structure (Aligned)", 
             "Reference Structure"
         )
+"""
